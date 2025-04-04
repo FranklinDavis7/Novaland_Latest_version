@@ -198,67 +198,113 @@ function PropertyInfo() {
 	};
 
 	const handleBuyNow = async () => {
-		if (!property || !walletAddress) {
-			setBuyError("Connect wallet & load property first.");
-			return;
-		}
-		if (walletAddress.toLowerCase() === property.owner.toLowerCase()) {
-			setBuyError("Owner cannot buy own property.");
-			return;
-		}
-		if (!property.isListed) {
-			setBuyError("Property not listed for sale.");
-			return;
-		}
-		setIsBuying(true);
-		setBuyError("");
-		setBuySuccess("");
-		try {
-			const provider = new ethers.providers.Web3Provider(window.ethereum);
-			const signer = provider.getSigner();
-			if (!signer) {
-				throw new Error("Wallet signer unavailable.");
-			}
-			const contractWithSigner = await loadContract(signer);
-			if (!contractWithSigner) {
-				throw new Error("Failed contract init.");
-			}
-			const transaction = await contractWithSigner.PurchaseProperty(
-				property.productID,
-				{ value: property.priceWei, gasLimit: 300000 }
-			);
-			setBuySuccess("Purchase tx sent. Waiting...");
-			console.log("Tx sent:", transaction.hash);
-			const receipt = await transaction.wait();
-			console.log("Tx confirmed:", receipt);
-			setBuySuccess(`Purchase successful! Tx: ${receipt.transactionHash}`);
-			setIsBuying(false);
-			setTimeout(() => {
-				navigate("/dashboard");
-			}, 4000);
-		} catch (error) {
-			console.error("Purchase failed:", error);
-			let message = "Purchase error.";
-			if (error.code === "ACTION_REJECTED" || error.code === 4001) {
-				message = "Tx rejected.";
-			} else if (error.reason) {
-				message = `Tx failed: ${error.reason}`;
-			} else if (error.data?.message) {
-				message = `Tx failed: ${error.data.message}`;
-			} else if (error.message) {
-				message = error.message;
-			}
-			if (message.includes("not listed")) {
-				message = "Property no longer listed.";
-			}
-			if (message.includes("insufficient funds")) {
-				message = "Insufficient funds.";
-			}
-			setBuyError(message);
-			setBuySuccess("");
-			setIsBuying(false);
-		}
-	};
+        // Pre-flight checks
+        if (!walletAddress) {
+            setBuyError("Please connect your wallet first.");
+            return;
+        }
+        if (!property) {
+            setBuyError("Property data not loaded. Please refresh.");
+            return;
+        }
+        if (walletAddress.toLowerCase() === property.owner.toLowerCase()) {
+            setBuyError("You cannot buy a property you already own.");
+            return;
+        }
+        if (!property.isListed) {
+            setBuyError("This property is not currently listed for sale.");
+            return;
+        }
+
+        setIsBuying(true); // Set loading state for purchase
+        setBuyError("");   // Clear previous errors
+        setBuySuccess(""); // Clear previous success messages
+
+        try {
+            // Need signer to send transaction
+            const provider = new ethers.providers.Web3Provider(window.ethereum);
+            const signer = provider.getSigner();
+            if (!signer || !(await signer.getAddress())) { // Verify signer is available
+                setBuyError("Wallet signer is unavailable. Ensure your wallet is unlocked and connected.");
+                setIsBuying(false);
+                return;
+            }
+
+            // Load contract instance with the signer
+            const contractWithSigner = await loadContract(signer);
+            if (!contractWithSigner) {
+                // loadContract should throw, but double-check
+                throw new Error("Failed to initialize contract for transaction.");
+            }
+
+            console.log(`Attempting purchase for property ID: ${property.productID}`);
+            console.log(`Buyer Address: ${walletAddress}`);
+            console.log(`Sending value (Wei): ${property.priceWei.toString()}`);
+
+            // --- Call the updated PurchaseProperty function ---
+            // Arguments: Property ID, Buyer Address
+            // Value: Price in Wei
+            const transaction = await contractWithSigner.PurchaseProperty(
+                property.productID, // uint256 id
+                walletAddress,     // address buyer
+                {
+                    value: property.priceWei, // payable amount
+                    gasLimit: 300000 // Optional: Adjust gas limit if needed, estimateGas is safer
+                }
+            );
+
+            setBuySuccess("Purchase transaction sent. Waiting for confirmation...");
+            console.log("Transaction sent:", transaction.hash);
+
+            // Wait for the transaction to be mined
+            const receipt = await transaction.wait();
+            console.log("Transaction confirmed:", receipt);
+
+            // Check transaction status in receipt
+            if (receipt.status === 0) {
+                throw new Error("Transaction failed on the blockchain (reverted). Check Etherscan for details.");
+            }
+
+            setBuySuccess(`Purchase successful! Transaction Hash: ${receipt.transactionHash}`);
+            setIsBuying(false); // Reset loading state
+
+            // Optional: Redirect after a delay
+            setTimeout(() => {
+                navigate("/dashboard"); // Redirect to dashboard after success
+            }, 4000); // 4 second delay
+
+        } catch (purchaseError) {
+            console.error("Purchase failed:", purchaseError);
+            let message = "An error occurred during purchase.";
+
+            // Attempt to parse specific error types
+            if (purchaseError.code === "ACTION_REJECTED" || purchaseError.code === 4001) {
+                message = "Transaction rejected in wallet.";
+            } else if (purchaseError.reason) {
+                // Ethers.js often includes a reason for reverted transactions
+                message = `Transaction failed: ${purchaseError.reason}`;
+            } else if (purchaseError.data?.message) {
+                // Some errors might have data.message
+                message = `Transaction failed: ${purchaseError.data.message}`;
+            } else if (purchaseError.message) {
+                // Fallback to general error message
+                message = purchaseError.message;
+            }
+
+            // Customize messages based on common revert reasons (if identifiable)
+            if (message.toLowerCase().includes("not listed for sale")) {
+                message = "Property is no longer listed for sale.";
+            } else if (message.toLowerCase().includes("insufficient funds")) {
+                message = "Insufficient funds for transaction cost + gas.";
+            } else if (message.toLowerCase().includes("buyer cannot be the current owner")) {
+                 message = "Owner cannot buy their own property.";
+            }
+
+            setBuyError(message.substring(0, 200)); // Truncate long messages if needed
+            setBuySuccess(""); // Clear any pending success message
+            setIsBuying(false); // Reset loading state
+        }
+    };
 
 	const sliderSettings = {
 		dots: true,

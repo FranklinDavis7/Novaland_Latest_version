@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect } from "react";
 import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
+import { AlertTriangle, Download } from 'lucide-react'; // Icons for prompt
 
 // Core Components & Pages
 import Header from "./components/Header";
@@ -11,7 +12,7 @@ import PropertyInfo from "./pages/PropertyInfo";
 import Dashboard from "./pages/Dashboard";
 import PropertyForm from "./pages/PropertyForm";
 import Editproperty from "./pages/Editproperty";
-// <-- IMPORT PurchasePage
+// <-- IMPORT PurchasePage if you have it -->
 
 import ChatPage from "./pages/Chatpage.jsx"; // Verify filename case sensitivity
 import MakeOffer from "./components/MakeOffer.jsx";
@@ -19,77 +20,120 @@ import AboutPage from "./pages/AboutPage";
 
 // Context & Services
 import { useWallet } from './pages/WalletContext'; // Verify path
-import { supabase } from "./../supabase"; // Verify path
+// Supabase import not strictly needed in App.js if handled elsewhere, but keep if used directly
+// import { supabase } from "./../supabase";
 
 function App() {
-    const { address, isConnected, connectWallet } = useWallet();
-    const [isMetaMaskInstalled, setIsMetaMaskInstalled] = useState(false);
+    // Use state from WalletContext
+    const { address, connectWallet, loading: walletLoading, error: walletError } = useWallet();
+    const [isMetaMaskInstalled, setIsMetaMaskInstalled] = useState(true); // Assume installed initially
+    // notificationCount state can remain if used
     const [notificationCount, setNotificationCount] = useState(0);
 
-    // Effect to check MetaMask installation
-     useEffect(() => {
-        if (typeof window.ethereum !== 'undefined') {
-            setIsMetaMaskInstalled(true);
+    // Effect to check MetaMask installation ONCE on component mount
+    useEffect(() => {
+        // Check immediately
+        if (typeof window.ethereum === 'undefined' || !window.ethereum.isMetaMask) {
+            console.log("MetaMask is not installed.");
+            setIsMetaMaskInstalled(false);
         } else {
-             setIsMetaMaskInstalled(false);
+             console.log("MetaMask is installed.");
+             setIsMetaMaskInstalled(true);
+
+             // Optional: Listen for account changes to potentially update state if needed
+             // This is often handled *within* the WalletContext itself, but good to be aware of
+             const handleAccountsChanged = (accounts) => {
+                console.log("App.js detected accountsChanged:", accounts);
+                // The WalletContext should handle updating the 'address' state
+                // If not, you might need logic here, but ideally context manages it.
+                if (accounts.length === 0) {
+                    console.log("Wallet disconnected in App.js listener");
+                    // Context should set address to null
+                } else {
+                    // Context should set address to accounts[0]
+                }
+             };
+
+             window.ethereum.on('accountsChanged', handleAccountsChanged);
+
+             // Cleanup listener on component unmount
+             return () => {
+                if (window.ethereum?.removeListener) { // Check for removeListener
+                     window.ethereum.removeListener('accountsChanged', handleAccountsChanged);
+                }
+             };
         }
-        // Add any other initial setup logic here
-    }, []);
-    // --- (Keep rest of your existing useEffects) ---
+    }, []); // Empty dependency array ensures this runs only once on mount
 
 
-    // --- Render MetaMask Install Prompt ---
+    // --- RENDER STATE 1: METAMASK NOT INSTALLED ---
     if (!isMetaMaskInstalled) {
-        // Keep your existing MetaMask install prompt UI
-         return <div>Please install MetaMask to use this application.</div>;
+        return (
+            <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-red-100 to-orange-100 text-gray-800 p-6">
+                 <AlertTriangle className="w-16 h-16 text-red-500 mb-6" />
+                <h1 className="text-3xl font-bold mb-4 text-center">MetaMask Required</h1>
+                <p className="text-lg text-center mb-8 max-w-md">
+                    To use this decentralized application, you need the MetaMask browser extension.
+                </p>
+                <a
+                    href="https://metamask.io/download/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-2 bg-orange-500 hover:bg-orange-600 text-white font-semibold py-3 px-6 rounded-lg shadow-md transition-colors duration-200"
+                >
+                    <Download className="w-5 h-5" />
+                    Install MetaMask
+                </a>
+                <p className="text-sm text-gray-600 mt-6">
+                    Refresh this page after installation.
+                </p>
+            </div>
+        );
     }
 
-    // --- Render Main Application ---
+    // WalletContext handles loading/error states internally usually,
+    // but you could add a global loading indicator here if desired:
+    // if (walletLoading) {
+    //    return <div>Loading Wallet...</div>;
+    // }
+
+    // --- RENDER STATE 2 & 3: METAMASK INSTALLED (Router handles connected/disconnected) ---
     return (
         <Router>
             <div className="flex flex-col min-h-screen">
+                {/* Header remains, gets connection status and function from context */}
                 <Header
                     notificationCount={notificationCount}
-                    isConnected={!!address} // Use context address for status
+                    isConnected={!!address} // Status based on context address
                     connectWallet={connectWallet} // Pass context connect function
                     walletAddress={address} // Pass context address
                 />
 
-                {/* --- TEMPORARY CONNECT BUTTON --- */}
-                {/* Only show this button if the wallet is not connected */}
-                {!address && (
-                    <div style={{ padding: '1rem', textAlign: 'center', background: '#f0f0f0', borderBottom: '1px solid #ccc' }}>
-                        <button
-                            onClick={connectWallet} // Call the connect function from the context
-                            style={{
-                                padding: '8px 16px',
-                                cursor: 'pointer',
-                                backgroundColor: '#4A90E2',
-                                color: 'white',
-                                border: 'none',
-                                borderRadius: '4px',
-                                fontWeight: 'bold'
-                            }}
-                        >
-                            Temporary Connect Button (App.jsx)
-                        </button>
-                         <p style={{ fontSize: '0.8rem', marginTop: '4px', color: '#666' }}>
-                            (For testing purposes only)
-                         </p>
-                    </div>
-                )}
-                {/* --- END TEMPORARY CONNECT BUTTON --- */}
+                 {/* Display Wallet Error from Context if any */}
+                 {walletError && (
+                     <div style={{ color: 'red', background: '#ffebee', padding: '10px', textAlign: 'center', borderBottom: '1px solid #ffcdd2' }}>
+                         Wallet Error: {walletError}
+                     </div>
+                 )}
 
                 <main className="flex-grow">
                     <Routes>
-                        {/* Conditional Home Route (as provided by user - forcing Home) */}
+                        {/* --- Conditional Root Route --- */}
+                        {/* If connected (address exists), show Home. */}
+                        {/* If not connected, show Home2 and pass the connect function */}
                         <Route
                             path="/"
-                            element={<Home />}
-                            // element={address ? <Home /> : <Home2 connectWallet={connectWallet} />} // Original logic
+                            element={
+                                address ? (
+                                    <Home />
+                                ) : (
+                                    <Home2 connectWithMetamask={connectWallet} /> // Pass connect function here
+                                )
+                            }
                         />
 
-                        {/* Protected Routes */}
+                        {/* --- Protected Routes --- */}
+                        {/* Redirect to '/' if address is null. '/' will then render Home2. */}
                         <Route path="/explore" element={address ? <Explore /> : <Navigate to="/" replace />} />
                         <Route path="/property/:id" element={address ? <PropertyInfo /> : <Navigate to="/" replace />} />
                         <Route path="/dashboard" element={address ? <Dashboard /> : <Navigate to="/" replace />} />
@@ -97,15 +141,15 @@ function App() {
                         <Route path="/chat" element={address ? <ChatPage /> : <Navigate to="/" replace />} />
                         <Route path="/propertyform" element={address ? <PropertyForm /> : <Navigate to="/" replace />} />
                         <Route path="/edit-property/:productId" element={address ? <Editproperty /> : <Navigate to="/" replace />} />
+                        {/* Add PurchasePage route here if needed, also protected */}
+                        {/* <Route path="/purchase/:id" element={address ? <PurchasePage /> : <Navigate to="/" replace />} /> */}
 
-                        {/* --- ADDED ROUTE FOR PURCHASE PAGE --- */}
-
-                        {/* ------------------------------------ */}
-
-                        {/* Public Routes */}
+                        {/* --- Public Routes --- */}
+                        {/* These are accessible regardless of connection status */}
                         <Route path="/about" element={<AboutPage />} />
 
-                        {/* Catch-all Route */}
+                        {/* --- Catch-all Route --- */}
+                        {/* Redirects any invalid path back to the root */}
                         <Route path="*" element={<Navigate to="/" replace />} />
                     </Routes>
                 </main>
